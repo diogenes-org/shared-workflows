@@ -21,6 +21,13 @@ on:
         required: true
   workflow_dispatch:
 
+env:
+  AWS_REGION: ${{ github.event.inputs.setRegion }}                                                      # set this to your preferred AWS region, e.g. us-west-1
+  ENV: ${{ github.event.inputs.setEnvironment }} 
+  APP_NAME: ${{ inputs.appName }}
+  ENVIRONMENT_NAME: ${{ github.event.inputs.appName }}-${{ github.event.inputs.setEnvironment }}
+  VERSION_LABEL: ${{ github.event.inputs.appName }}-${{ github.event.inputs.setEnvironment }}-${{ github.sha }}-${{github.run_number}}
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # Deploy to Amazon ECS job
@@ -41,3 +48,19 @@ jobs:
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+  deploy Beanstalk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy Amazon Beanstalk
+        run: |
+        aws s3 cp ./app/app.zip s3://$ENVIRONMENT_NAME-bucket/$ENV/$VERSION_LABEL
+        aws --region $AWS_REGION elasticbeanstalk create-application-version --application-name $APP_NAME --version-label $VERSION_LABEL --source-bundle S3Bucket=$ENVIRONMENT_NAME-bucket,S3Key=$ENV/$VERSION_LABEL
+        aws --region $AWS_REGION elasticbeanstalk update-environment --environment-name $ENVIRONMENT_NAME --version-label $VERSION_LABEL
+  deploy Cloudfront:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy Application
+      run: |
+        aws s3 sync --no-follow-symlinks app/ s3://$APP_NAME-$ENV-bucket/
