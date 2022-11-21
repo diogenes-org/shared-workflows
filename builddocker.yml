@@ -1,5 +1,5 @@
 # Workflow name
-name: Deploy App
+name: Build Docker image
 
 # Events that call the workflow
 on:
@@ -42,36 +42,24 @@ env:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # Deploy to Amazon ECS job
-  deploy ECS:
+  build Docker image:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Download task definition
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          IMAGE_TAG: ${{ github.sha }}-${{github.run_number}}
         run: |
-        aws ecs describe-task-definition --task-definition $APP_NAME --query taskDefinition > task-definition.json
-
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: task-definition.json
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
-  deploy Beanstalk:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Deploy Amazon Beanstalk
-        run: |
-        aws s3 cp ./app/app.zip s3://$ENVIRONMENT_NAME-bucket/$ENV/$VERSION_LABEL
-        aws --region $AWS_REGION elasticbeanstalk create-application-version --application-name $APP_NAME --version-label $VERSION_LABEL --source-bundle S3Bucket=$ENVIRONMENT_NAME-bucket,S3Key=$ENV/$VERSION_LABEL
-        aws --region $AWS_REGION elasticbeanstalk update-environment --environment-name $ENVIRONMENT_NAME --version-label $VERSION_LABEL
-  deploy Cloudfront:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Deploy Application
-      run: |
-        aws s3 sync --no-follow-symlinks app/ s3://$APP_NAME-$ENV-bucket/
+        # Build a docker container and
+        # push it to ECR so that it can
+        # be deployed to ECS.
+        cd ./app
+        docker build -t $ECR_REPOSITORY:latest --build-arg config_env=${{ github.event.inputs.setEnvironment }} .
+        docker tag $ECR_REPOSITORY:latest $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker tag $ECR_REPOSITORY:latest $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
